@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>India Air Quality Dashboard – Live AQI by City</title>
+<meta name="description" content="Live air quality (Indian NAQI from PM2.5 and PM10) and weather for major Indian cities, with a 24-hour trend chart and city ranking. Free Open-Meteo data, vanilla JS.">
+<style>
+:root{--bg:#0B1020;--panel:#121A2E;--panel2:#18223A;--ink:#E8EEF8;--muted:#8D9AB3;--line:#243049;--accent:#5EEAD4}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:radial-gradient(1200px 600px at 80% -10%,#1C2A52 0,transparent 60%),var(--bg);color:var(--ink);min-height:100vh}
+.wrap{max-width:1150px;margin:0 auto;padding:22px 18px 40px}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+h1{font-size:1.35rem;letter-spacing:-.01em}
+h1 small{display:block;font-size:.8rem;color:var(--muted);font-weight:400;margin-top:2px}
+.ctrl{display:flex;gap:8px;flex-wrap:wrap}
+select,button{font:inherit;background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:9px 12px;cursor:pointer}
+.grid{display:grid;grid-template-columns:1.1fr 1fr;gap:16px;align-items:start}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px}
+.hero{display:grid;grid-template-columns:auto 1fr;gap:20px;align-items:center}
+.gauge{width:170px;height:170px;position:relative}
+.gauge svg{transform:rotate(-90deg)}
+.gauge .num{position:absolute;inset:0;display:grid;place-items:center;text-align:center}
+.gauge .num b{font-size:2.4rem;display:block;line-height:1}
+.gauge .num span{font-size:.75rem;color:var(--muted)}
+.cat{display:inline-block;padding:4px 12px;border-radius:999px;font-weight:700;font-size:.85rem;color:#0B1020}
+.advice{color:var(--muted);margin-top:10px;font-size:.92rem;line-height:1.5}
+.pol{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
+.pol div{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:.82rem;color:var(--muted)}
+.pol b{color:var(--ink);font-size:1rem;display:block}
+.wx{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.wx div{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:12px;text-align:center}
+.wx b{display:block;font-size:1.3rem;margin-top:4px}
+.wx span{font-size:.75rem;color:var(--muted)}
+h2{font-size:.95rem;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
+h2 small{color:var(--muted);font-weight:400;font-size:.75rem}
+canvas{width:100%;height:220px;display:block}
+.rank li{list-style:none;display:grid;grid-template-columns:24px 1fr 60px 110px;gap:10px;align-items:center;padding:8px 6px;border-bottom:1px solid var(--line);font-size:.9rem;cursor:pointer;border-radius:8px}
+.rank li:hover{background:var(--panel2)}
+.rank li.me{background:var(--panel2);outline:1px solid var(--accent)}
+.rank .n{color:var(--muted)}
+.bar{height:8px;border-radius:4px;background:var(--line);overflow:hidden}
+.bar i{display:block;height:100%}
+.scale{display:grid;grid-template-columns:repeat(6,1fr);gap:4px;margin-top:12px;font-size:.7rem;text-align:center}
+.scale div{padding:6px 2px;border-radius:6px;color:#0B1020;font-weight:700}
+.note{color:var(--muted);font-size:.78rem;margin-top:16px;line-height:1.5}
+.note a{color:var(--accent)}
+.loading{opacity:.5;pointer-events:none}
+.err{background:#3b1520;border:1px solid #7f1d1d;color:#fecaca;padding:12px;border-radius:12px;margin-bottom:14px;display:none}
+@media(max-width:880px){.grid{grid-template-columns:1fr}.wx{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:480px){.hero{grid-template-columns:1fr;justify-items:center;text-align:center}.pol{justify-content:center}}
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <header>
+    <h1>🇮🇳 India Air Quality Dashboard<small id="updated">Loading live data…</small></h1>
+    <div class="ctrl"><select id="city"></select><button id="locate">📍 My location</button><button id="refresh">↻ Refresh</button></div>
+  </header>
+  <div class="err" id="err"></div>
+  <div class="grid">
+    <div class="panel hero">
+      <div class="gauge"><svg width="170" height="170"><circle cx="85" cy="85" r="72" stroke="#243049" stroke-width="14" fill="none"/><circle id="arc" cx="85" cy="85" r="72" stroke="#5EEAD4" stroke-width="14" fill="none" stroke-linecap="round" stroke-dasharray="452.4" stroke-dashoffset="452.4" style="transition:stroke-dashoffset .8s,stroke .4s"/></svg>
+        <div class="num"><div><b id="aqi">–</b><span>Indian AQI</span></div></div></div>
+      <div>
+        <div style="font-size:1.25rem;font-weight:700" id="place">–</div>
+        <span class="cat" id="cat">–</span>
+        <p class="advice" id="advice"></p>
+        <div class="pol"><div>PM2.5 (24h avg)<b id="pm25">–</b></div><div>PM10 (24h avg)<b id="pm10">–</b></div><div>Main pollutant<b id="main">–</b></div></div>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Weather now</h2>
+      <div class="wx"><div><span>Condition</span><b id="cond">–</b></div><div><span>Temperature</span><b id="temp">–</b></div><div><span>Humidity</span><b id="hum">–</b></div><div><span>Wind</span><b id="wind">–</b></div></div>
+      <div class="scale" id="scale"></div>
+    </div>
+    <div class="panel">
+      <h2>PM2.5 trend <small>past 24h + next 24h forecast (µg/m³)</small></h2>
+      <canvas id="chart"></canvas>
+    </div>
+    <div class="panel">
+      <h2>City ranking <small>cleanest → most polluted · tap to view</small></h2>
+      <ul class="rank" id="rank"></ul>
+    </div>
+  </div>
+  <p class="note">AQI is calculated with India's National AQI (CPCB) breakpoints from 24-hour average PM2.5 and PM10 model data. Values are estimates for learning and planning, not official CPCB readings. Data: <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> (CAMS). Built by <a href="https://melwin139.github.io" target="_blank" rel="noopener">Melwin Naigam</a>.</p>
+</div>
+
+<script>
+const CITIES=[["Delhi",28.61,77.21],["Mumbai",19.08,72.88],["Pune",18.52,73.86],["Bengaluru",12.97,77.59],["Chennai",13.08,80.27],["Kolkata",22.57,88.36],["Hyderabad",17.39,78.49],["Ahmedabad",23.02,72.57],["Jaipur",26.91,75.79],["Lucknow",26.85,80.95],["Patna",25.59,85.14],["Chandigarh",30.73,76.78],["Kochi",9.93,76.27],["Guwahati",26.14,91.74],["Nagpur",21.15,79.09]];
+// CPCB National AQI breakpoints [concLow, concHigh, aqiLow, aqiHigh]
+const BP={pm25:[[0,30,0,50],[31,60,51,100],[61,90,101,200],[91,120,201,300],[121,250,301,400],[251,500,401,500]],
+          pm10:[[0,50,0,50],[51,100,51,100],[101,250,101,200],[251,350,201,300],[351,430,301,400],[431,800,401,500]]};
+const CATS=[[50,"Good","#22C55E","Minimal impact. A great day to be outdoors."],[100,"Satisfactory","#A3E635","Minor breathing discomfort for sensitive people."],[200,"Moderate","#FACC15","People with asthma, heart disease, children and older adults should limit long outdoor exertion."],[300,"Poor","#FB923C","Breathing discomfort for most people on prolonged exposure. Consider a mask outdoors."],[400,"Very Poor","#EF4444","Respiratory illness on prolonged exposure. Avoid outdoor exercise; keep windows closed."],[500,"Severe","#A21CAF","Affects healthy people too. Stay indoors and use an air purifier if you can."]];
+const WMO={0:"☀️ Clear",1:"🌤️ Mostly clear",2:"⛅ Partly cloudy",3:"☁️ Cloudy",45:"🌫️ Fog",48:"🌫️ Fog",51:"🌦️ Drizzle",53:"🌦️ Drizzle",55:"🌦️ Drizzle",61:"🌧️ Rain",63:"🌧️ Rain",65:"🌧️ Heavy rain",80:"🌦️ Showers",81:"🌦️ Showers",82:"⛈️ Showers",95:"⛈️ Thunderstorm",96:"⛈️ Thunderstorm",99:"⛈️ Thunderstorm"};
+const $=s=>document.querySelector(s);
+
+function sub(c,table){ c=Math.round(c); for(const [cl,ch,al,ah] of table){ if(c<=ch) return Math.round((ah-al)/(ch-cl)*(c-cl)+al); } return 500; }
+const cat=a=>CATS.find(c=>a<=c[0])||CATS[5];
+const avg=a=>{const v=a.filter(x=>x!=null);return v.length?v.reduce((s,x)=>s+x,0)/v.length:null};
+
+function nowIndex(times){ const n=new Date(); const key=`${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}-${String(n.getDate()).padStart(2,"0")}T${String(n.getHours()).padStart(2,"0")}:00`; const i=times.indexOf(key); return i<0?Math.floor(times.length/2):i; }
+function computeAQI(h){ const i=nowIndex(h.time), from=Math.max(0,i-23);
+  const p25=avg(h.pm2_5.slice(from,i+1)), p10=avg(h.pm10.slice(from,i+1));
+  const a25=sub(p25,BP.pm25), a10=sub(p10,BP.pm10);
+  return {aqi:Math.max(a25,a10), pm25:p25, pm10:p10, main:a25>=a10?"PM2.5":"PM10", idx:i}; }
+
+let state={sel:"Pune", custom:null, aq:{}, wx:{}};
+
+async function fetchAll(){
+  const list=[...CITIES]; if(state.custom) list.push(state.custom);
+  const lat=list.map(c=>c[1]).join(","), lon=list.map(c=>c[2]).join(",");
+  const [aq,wx]=await Promise.all([
+    fetch(`https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}&hourly=pm2_5,pm10&past_days=1&forecast_days=2&timezone=Asia%2FKolkata`).then(r=>{if(!r.ok)throw new Error("air quality "+r.status);return r.json()}),
+    fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code&timezone=Asia%2FKolkata`).then(r=>{if(!r.ok)throw new Error("weather "+r.status);return r.json()})]);
+  const A=Array.isArray(aq)?aq:[aq], W=Array.isArray(wx)?wx:[wx];
+  list.forEach((c,i)=>{ state.aq[c[0]]={hourly:A[i].hourly, ...computeAQI(A[i].hourly)}; state.wx[c[0]]=W[i].current; });
+}
+
+function render(){
+  const name=state.sel, a=state.aq[name], w=state.wx[name]; if(!a) return;
+  const c=cat(a.aqi);
+  $("#place").textContent=name; $("#aqi").textContent=a.aqi;
+  $("#cat").textContent=c[1]; $("#cat").style.background=c[2]; $("#advice").textContent=c[3];
+  $("#arc").style.stroke=c[2]; $("#arc").style.strokeDashoffset=452.4*(1-Math.min(a.aqi,500)/500);
+  $("#pm25").textContent=a.pm25.toFixed(1); $("#pm10").textContent=a.pm10.toFixed(1); $("#main").textContent=a.main;
+  $("#cond").textContent=WMO[w.weather_code]||"–"; $("#temp").textContent=Math.round(w.temperature_2m)+"°C"; $("#hum").textContent=w.relative_humidity_2m+"%"; $("#wind").textContent=Math.round(w.wind_speed_10m)+" km/h";
+  drawChart(a);
+  const ranked=Object.keys(state.aq).map(k=>[k,state.aq[k].aqi]).sort((x,y)=>x[1]-y[1]);
+  $("#rank").innerHTML=ranked.map(([k,v],i)=>{const cc=cat(v);return `<li class="${k===name?"me":""}" data-c="${k}"><span class="n">${i+1}</span><span>${k}</span><b style="color:${cc[2]}">${v}</b><div class="bar"><i style="width:${Math.min(v,500)/5}%;background:${cc[2]}"></i></div></li>`}).join("");
+  $("#updated").textContent="Updated "+new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"})+" IST · auto-refresh every 30 min";
+}
+
+function drawChart(a){
+  const cv=$("#chart"), dpr=window.devicePixelRatio||1, W=cv.clientWidth, Hh=cv.clientHeight;
+  cv.width=W*dpr; cv.height=Hh*dpr; const g=cv.getContext("2d"); g.scale(dpr,dpr); g.clearRect(0,0,W,Hh);
+  const from=Math.max(0,a.idx-24), to=Math.min(a.hourly.time.length,a.idx+25);
+  const t=a.hourly.time.slice(from,to), v=a.hourly.pm2_5.slice(from,to), now=a.idx-from;
+  const pad={l:34,r:10,t:10,b:22}, max=Math.max(60,...v.filter(x=>x!=null))*1.1;
+  const X=i=>pad.l+i/(v.length-1)*(W-pad.l-pad.r), Y=y=>Hh-pad.b-y/max*(Hh-pad.t-pad.b);
+  // category bands
+  [[0,30,"#22C55E"],[30,60,"#A3E635"],[60,90,"#FACC15"],[90,120,"#FB923C"],[120,250,"#EF4444"],[250,9999,"#A21CAF"]].forEach(([lo,hi,col])=>{ if(lo>max) return; g.fillStyle=col+"18"; g.fillRect(pad.l,Y(Math.min(hi,max)),W-pad.l-pad.r,Y(lo)-Y(Math.min(hi,max))); });
+  g.fillStyle="#8D9AB3"; g.font="11px system-ui"; g.textAlign="right";
+  for(let k=0;k<=4;k++){ const y=max/4*k; g.fillText(Math.round(y),pad.l-6,Y(y)+4); }
+  g.textAlign="center"; [0,Math.floor(now/2),now,now+Math.floor((v.length-now)/2),v.length-1].forEach(i=>{ if(t[i]) g.fillText(t[i].slice(11,16),X(i),Hh-6); });
+  const line=(s,e,dash,col)=>{ g.beginPath(); g.setLineDash(dash); g.strokeStyle=col; g.lineWidth=2.2; let st=false; for(let i=s;i<=e;i++){ if(v[i]==null) continue; st?g.lineTo(X(i),Y(v[i])):g.moveTo(X(i),Y(v[i])); st=true; } g.stroke(); g.setLineDash([]); };
+  line(0,now,[], "#5EEAD4"); line(now,v.length-1,[6,5],"#93C5FD");
+  g.strokeStyle="#ffffff55"; g.beginPath(); g.moveTo(X(now),pad.t); g.lineTo(X(now),Hh-pad.b); g.stroke();
+  g.fillStyle="#fff"; g.beginPath(); g.arc(X(now),Y(v[now]||0),4,0,7); g.fill();
+  g.fillStyle="#E8EEF8"; g.textAlign="left"; g.fillText("now",X(now)+6,pad.t+10);
+}
+
+async function load(){
+  $("#app").classList.add("loading"); $("#err").style.display="none";
+  try{ await fetchAll(); render(); }
+  catch(e){ $("#err").textContent="Couldn't load live data ("+e.message+"). Check your connection and press Refresh."; $("#err").style.display="block"; }
+  $("#app").classList.remove("loading");
+}
+
+$("#city").innerHTML=CITIES.map(c=>`<option ${c[0]==="Pune"?"selected":""}>${c[0]}</option>`).join("");
+$("#city").onchange=e=>{ state.sel=e.target.value; render(); };
+$("#rank").addEventListener("click",e=>{ const li=e.target.closest("li"); if(!li) return; state.sel=li.dataset.c; if([...$("#city").options].some(o=>o.value===state.sel)) $("#city").value=state.sel; render(); window.scrollTo({top:0,behavior:"smooth"}); });
+$("#refresh").onclick=load;
+$("#locate").onclick=()=>{ if(!navigator.geolocation) return alert("Location is not supported in this browser.");
+  navigator.geolocation.getCurrentPosition(p=>{ state.custom=["📍 My location",+p.coords.latitude.toFixed(2),+p.coords.longitude.toFixed(2)]; state.sel=state.custom[0];
+    if(![...$("#city").options].some(o=>o.value===state.sel)) $("#city").insertAdjacentHTML("afterbegin",`<option>${state.sel}</option>`); $("#city").value=state.sel; load(); },
+    ()=>alert("Couldn't get your location. Pick a city from the list instead.")); };
+$("#scale").innerHTML=CATS.map((c,i)=>`<div style="background:${c[2]}">${c[1]}<br>${i?CATS[i-1][0]+1:0}–${c[0]}</div>`).join("");
+window.addEventListener("resize",()=>render());
+load(); setInterval(load,30*60*1000);
+</script>
+</body>
+</html>
